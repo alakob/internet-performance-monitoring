@@ -1,0 +1,679 @@
+---
+title: "SamKnows Data Analyst Technical Test"
+author: "Blaise Alako"
+date: "08/05/2022"
+output: 
+    html_document:
+        theme: cerulean
+        highlight: kate
+        fig_width: 10
+        fig_height: 7
+        fig_caption: true
+        df_print: kable
+        toc: true
+        toc_depth: 5
+        toc_float:
+          collapsed: true
+          smooth_scroll: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE)
+```
+
+## 1 - Packages
+### Load the libraries
+
+```{r, warning=FALSE}
+library(tidyverse)        # Core Libraries - dplyr, ggplot2
+library(lubridate)        # Library for manipulating date
+library(skimr)            # Library for summary statistic of the data
+library(plotly)           # Library for interactive plots
+library(hrbrthemes)       # A theme library
+library(janitor)          # Library for cleaning data
+```
+
+## 2 - Data import and Cleaning  
+
+Read the CSV file into a tibble
+```{r}
+download_speed_measurement_tbl <- read_csv('../data/download_speed_measurements.csv')
+upload_speed_measurement_tbl   <- read_csv('../data/upload_speed_measurements.csv')
+details_for_each_person_tbl    <- read_csv('../data/details_for_each_person.csv')
+```
+
+Exploratory analysis and Cleaning: Check for duplicate rows in the data with the **janitor** package and
+generate an overview summary of the input data with the **skimr** package
+
+Let's check that we do not have duplicate rows
+
+```{r, results='hide'}
+duplicate_download <- download_speed_measurement_tbl %>% get_dupes()
+duplicate_upload   <- upload_speed_measurement_tbl %>% get_dupes()
+duplicate_users    <- details_for_each_person_tbl %>%  get_dupes()
+```
+
+### Comments
+
+* No duplicate rows found in all imported raw files
+
+
+### Summary statistics
+
+Summary statistics of the imported raw input files
+
+#### Download speed overview
+
+**Download_speed_mesurement_tbl** data frame broad overview.
+For the purpose of simplifying **skim()** function reporting output , let's display only the variables with missing value;
+other information in the comment section below was derived from the full output of the  **skim()** function
+```{r}
+download_speed_measurement_tbl %>%
+    skimr::skim() %>% 
+    filter(n_missing > 0)
+```
+
+##### Comments
+
+* The download speed table contains **191200** rows and **4** columns
+* The data is made up of three variable type (**Character, logical and numeric**)
+* The Character and Logical columns **do not have missing value and looks OK**
+* The numeric **measured_download_speed_in_Mbps** columns contain missing data (**~0.20%**)
+
+#### Upload speed overview
+
+**Upload_speed_mesurement_tbl** data frame broad overview.
+For the purpose of simplifying **skim()** function reporting output , let's display only the variables with missing value;
+other information in the comment section below was derived from the full output of the  **skim()** function
+The code result is not shown to save space on this report and the output is summarized in the comment section below
+
+```{r, results = 'hide'}
+upload_speed_measurement_tbl %>% 
+    skimr::skim()%>% 
+    filter(n_missing > 0)
+```
+
+##### Comments
+
+* The upload speed table contains **159447** rows and **4** columns
+* The data is made up of three variable type (**Character, logical and numeric**)
+* The Character and Logical columns **do not have missing and looks OK**
+* The numeric **measured_upload_speed_in_Mbps** columns contain missing data (**~0.20%**)
+
+#### Person details overview
+
+**details_for_each_person_tbl** data frame broad overview.
+For the purpose of simplifying **skim()** function reporting output , let's display only the variables with missing value;
+other information in the comment section below was derived from the full output of the  **skim()** function
+The code result is not shown to save space on this report and the output is summarized in the comment section below
+
+```{r, results = 'hide'}
+details_for_each_person_tbl %>%  
+    skimr::skim() %>% 
+    filter(n_missing > 0)
+```
+
+##### Comments
+
+* The details for each person table contains **291** rows and **4** columns
+* The data is made up of two variable type (**Character and numeric**)
+* The Character and numeric columns **do not have missing and looks OK**
+
+
+From the **DATA_DICTIONARY.md** we observe that **download_speed_measurement_tbl** and **details_for_each_person_tbl**
+have a column in common, the **person_id** column
+From the **DATA_DICTIONARY.md** we observe that **upload_speed_measurement_tbl** and **details_for_each_person_tbl**
+have a column in common, the **person_id** column
+
+For simplicity we will merge the data in two separate step as follows.
+
+* 1- Merge download speed and users details data frames using the **person_id** as a common field
+* 2- Merge Upload speed and users details data frames using the **person_id** as common field
+
+```{r}
+
+download_speed_user_detail_tbl <- download_speed_measurement_tbl %>%
+    # Join by the common column (person_id)
+    left_join(details_for_each_person_tbl, 
+              by = c("person_id" = "person_id"))
+
+upload_speed_user_detail_tbl <- upload_speed_measurement_tbl %>%
+    # Join by person_id the common
+    left_join(details_for_each_person_tbl, 
+              by = c("person_id" = "person_id"))
+
+```
+
+#### Tasks:
+
+We are require to filter the data on:
+
+* **User living in specific cities**
+* **Where measurement was successful**
+* **Where test were conducted after a specific date**
+
+Since we decided to process the download-user-details and upload-users_detail in two separate steps,
+to avoid repeating the similar processing steps we will define some functions to
+facilitate the processing.
+
+##### Action plan: 
+
+Define three function:
+
+* **filter_by_city_date_test_status**         : filter the data on specified conditions
+* **calculate_speed_percentile_perunit_time** : Calculate the nth percentile per defined unit time (hour, day, week, month)
+* **calculate_speed_average_per_variables**   : Calculate the average download or upload speed per user
+
+```{r}
+# filter_by_city_date_test_status function
+filter_by_city_date_test_status <-
+    function(data    = data,                          # input data frame
+             date    = '2020-12-31',                  # date: Default Date above which to select data
+             cities  = c("Samsville", "Databury"),    # cities: Default cities to filter data by
+             success = TRUE){                         # Success: Whether the test was a success (TRUE or FALSE)
+        data <- data %>% filter(city %in% cities) %>%
+            # Filter on successful test
+            filter(did_test_complete_successfully == success) %>%
+            # Convert the character type time_of_measurement into 
+            # datetime data type using ymd_hms from the lubridate package
+            mutate(time_of_measurement = ymd_hms(time_of_measurement)) %>%
+            # select rows where measurement was done after a specific date
+            filter(time_of_measurement > ymd(date))
+        return (data)
+    }
+
+# calculate_speed_percentile_perunit_time function 
+calculate_speed_percentile_perunit_time  <-
+    function(data        = data,                              # Input data frame
+             measurement = measured_download_speed_in_Mbps,   # unquote column name of speed measurement(download/upload)
+             unit_time   = "day",                             # Unit time to compute percentile from
+             probs       = .60){                              # quantile probability with value in [0,1]
+        # prepare the measurement to be used inside tidy methods
+        measurement_expr <- enquo(measurement)
+        if (as_label(measurement_expr) %in% colnames(data) ){
+            data <- data %>%  
+                mutate(date = time_of_measurement %>%
+                       floor_date(unit = unit_time)) %>%
+                group_by(person_id, date) %>%
+                # Calculate the mean upload or download speed per person per date(day)
+                summarize(average_measurement = mean(!!measurement_expr)) %>%
+                ungroup() %>%
+                group_by(person_id) %>%
+                # Calculate the nth percentile download or upload speed per user
+                summarize(mesurement_percentile = quantile(average_measurement, 
+                                                           probs= probs)) %>%
+                ungroup()
+        }
+        else{
+            stop(str_glue("measurement = {measurement_expr} is not a permitted option." ))
+        }
+        return(data)
+
+    }
+# calculate_speed_average_per_variables function
+calculate_speed_average_per_variables <-
+    function (data = data,                                      # input data frame
+              ...,                                              # unquote variables to group by
+              measurement = measured_download_speed_in_Mbps){   # unquote column name of speed measurement
+        measurement_expr <- enquo(measurement)
+        groupby_vars_expr <- quos(...)
+        if (as_label(measurement_expr) %in% colnames(data) ){
+            data <- data %>%
+            group_by(!!! groupby_vars_expr) %>%
+            summarise(average_measurement = mean(!!measurement_expr)) %>%
+            ungroup()
+        }
+        else{
+            stop(str_glue("measurement = {measurement_expr} is not a permitted option." ))
+        }
+        return(data)
+}
+
+
+```
+
+Now let's combine these data frame the Tidy way into a single table which has the structure
+**person_id, city, type_of_broadband_connection, name_of_isp, average_download_speed, average_upload_speed, percentile60_download_speed**
+
+#### Subset data
+
+Filter download and upload measurement as per instruction
+```{r}
+
+successfull_download_tbl <-
+    download_speed_user_detail_tbl %>%
+    # Filter data frame on given date, cities and measurement status
+    filter_by_city_date_test_status(date    = '2020-12-31',
+                                    cities  = c("Samsville", "Databury"),
+                                    success = TRUE)
+
+successfull_upload_tbl <- upload_speed_user_detail_tbl %>%
+    filter_by_city_date_test_status(date    = '2020-12-31',
+                                    cities  = c("Samsville", "Databury"),
+                                    success = TRUE)
+```
+
+#####  Avg/percentile
+
+Calculate and append average and percentiles
+```{r}
+download_upload_speed_users_details_tbl <- successfull_download_tbl %>%
+    # Calculate the average download speed per users
+    calculate_speed_average_per_variables(person_id,
+                                          city,
+                                          type_of_broadband_connection,
+                                          name_of_isp) %>%
+    # Rename the average download speed column name
+    rename(average_download_speed_in_Mbps = average_measurement) %>%
+    # Calculate and append the average upload speed per user
+    left_join(successfull_upload_tbl %>%
+                  calculate_speed_average_per_variables(
+                      person_id ,
+                      measurement = measured_upload_speed_in_Mbps) %>%
+                  rename(average_upload_speed_in_Mbps=average_measurement)) %>%
+    # Optional: Calculate and append the 60th percentile download speed per day
+    left_join(successfull_download_tbl %>%
+                  calculate_speed_percentile_perunit_time(
+                      unit_time   = "day",
+                      measurement = measured_download_speed_in_Mbps)) %>%
+    # Rename the 60th percentile download speed column name
+    rename(percentile60_download_speed_in_Mbps = mesurement_percentile)
+
+```
+
+##### Merged data overview
+
+**download_upload_speed_users_details_tbl** data frame broad overview.
+For the purpose of simplifying the **skim()** function reporting output , let's display only the variable with missing values;
+other information in the comment section below was derived from the full output of the  **skim()** function
+The code result is not shown to save space on this report but the output is summarized in the comment section below
+
+```{r, results='hide'}
+download_upload_speed_users_details_tbl %>%
+    skimr::skim() %>% 
+    filter(n_missing > 0)
+```
+
+##### Comment
+
+* There are no missing values in the filtered and combined **download_upload_speed_users_details_tbl** data frame
+as shown by the **n_missing** column of the **skim()** output
+* Missing values were removed when we kept only those measurement that ran successfully see (**filter_by_city_date_test_status**) function above
+
+
+
+## 3 - Data quality 
+
+There are missing data in the raw input files above. However there are no missing data in the filtered and combined
+data frame (download_upload_speed_users_details_tbl). see comment section above
+
+### Download vs Upload
+
+Relationship between download and upload speeds
+
+```{r}
+download_upload_scatter_plot  <- download_upload_speed_users_details_tbl %>%
+    
+    # Data manipulation: Construct a label for interactive plot
+    mutate(label_text = str_glue('person_id = {person_id}
+                                 download   = {round(percentile60_download_speed_in_Mbps,2)} Mbps
+                                 upload     = {round(average_upload_speed_in_Mbps,2)} Mbps
+                                 broadband  = {type_of_broadband_connection}
+                                 ISP        = {name_of_isp}')) %>%
+    mutate(type_of_broadband_connection = type_of_broadband_connection %>%
+               fct_relevel("ADSL","VDSL","Fibre")) %>% 
+    
+    # Data Visualization
+    ggplot(aes(x = percentile60_download_speed_in_Mbps, 
+               y = average_upload_speed_in_Mbps,
+               color = type_of_broadband_connection)) +
+    geom_jitter(aes(text = label_text), width =.1 , height = .1) +
+    scale_x_continuous(trans = "log10")  +
+    scale_y_continuous(trans = "log10")  +
+    facet_wrap(city ~ name_of_isp) + 
+    labs(title    = "Average Download Upload speed by ISP by City by Connection type", 
+          x       = "Average download speed in Mbps (log scale)",
+          y       = "Average upload speed in Mbps (log scale)",
+          color   = "Connection Type",
+          caption = "B. Alako: SamKnows Data analyst Technical Test") +
+     theme_ipsum()
+
+# Interactive plot
+ggplotly(download_upload_scatter_plot, tooltip = "text")
+
+```
+
+#### Comment
+* There are mislabeled connection types having unexpected download and upload speed.
+* Move the mouse over the point on the plot to get the details of mislabeled entries.
+
+#### Action plan:
+
+* Identify the mislabeled entries from download_upload_speed_users_details_tbl data frame 
+* Relabel Connection type accordingly.
+
+
+```{r}
+# Identify theses mislabeled entries
+fibre_labeled_as_adsl_tbl <- download_upload_speed_users_details_tbl %>% 
+        filter(type_of_broadband_connection == "ADSL" ,
+               percentile60_download_speed_in_Mbps > 25) %>% 
+    mutate(average_download_speed_in_Mbps = round(average_download_speed_in_Mbps,2))
+adsl_labeled_as_fibre_tbl <- download_upload_speed_users_details_tbl %>% 
+        filter(type_of_broadband_connection == "Fibre" ,
+               percentile60_download_speed_in_Mbps <  25) %>% 
+     mutate(average_download_speed_in_Mbps = round(average_download_speed_in_Mbps,2))
+
+```
+##### Mislabeled Fibre
+Fibre connection type labeled as ADSL connection type
+```{r}
+fibre_labeled_as_adsl_tbl
+```
+##### Mislabeled ADSL
+ADSL connection type labeled as Fibre connection type
+```{r}
+adsl_labeled_as_fibre_tbl
+```
+
+##### Comment
+
+* There are six ADSL connection type entries with speed in the range of Fibre speed (>180 Mbps).
+* There are six Fibre connection type entries with speed in the range of ADSL speed (9-14 Mbps).
+
+Let's correctly relabel mislabeled connection type
+```{r}
+download_upload_speed_users_details_tbl <- 
+    download_upload_speed_users_details_tbl %>% 
+    mutate(type_of_broadband_connection = case_when(
+        type_of_broadband_connection == "ADSL"  & percentile60_download_speed_in_Mbps > 25 ~ "Fibre", 
+        type_of_broadband_connection == "Fibre" & percentile60_download_speed_in_Mbps < 25 ~ "ADSL",  
+        TRUE ~ type_of_broadband_connection
+))
+```
+
+
+##   4 - Data Summarization
+Difference in download speed between ISP for each connection type.
+Since the procedure to calculate the difference in download speed and difference in upload speed between ISP for each
+Connection type is the same, let's define a function to facilitate this process
+
+```{r}
+# A function to summarize the download or upload speed difference between ISP
+speed_difference_btw_isp <- 
+    function(data = data,                                       # input data frame
+             ...,                                               # unquote variables to group by
+             measurement = percentile60_download_speed_in_Mbps  # unquote column name of speed measurement
+             ){
+    groupby_vars_expr <- quos(...)
+    measurement_expr <- enquo(measurement)
+    if (as_label(measurement_expr) %in% colnames(data) ){
+        data <- data %>%
+            select(type_of_broadband_connection, 
+                   name_of_isp, city, 
+                   !! measurement_expr)  %>%
+            group_by(!!! groupby_vars_expr) %>%
+            summarize(mean_measurement = mean(!! measurement_expr)) %>%
+            ungroup() %>%
+            pivot_wider(names_from  = name_of_isp,
+                        values_from = mean_measurement)
+    }
+    else{
+        stop(str_glue("measurement = {measurement_expr} is not a permitted option." ))
+    }
+
+    return(data)
+}    
+
+```
+
+
+### 4 - a) Speed difference
+Download speed difference and upload speed difference between ISP for each connection type
+
+```{r}
+# Difference in Download between ISP by connection type
+difference_in_download_btw_isp_tbl <- download_upload_speed_users_details_tbl %>%
+    speed_difference_btw_isp(type_of_broadband_connection,
+                             name_of_isp,
+                             measurement = percentile60_download_speed_in_Mbps ) %>% 
+    mutate(Fibrelicious = round(Fibrelicious, 2), 
+           Useus = round(Useus,2))
+
+difference_in_download_btw_isp_tbl
+```
+
+#### Comment
+
+* Overall Fibrelicious ISP offers a better download speed compare to Useus ISP
+* We will need to test for the significance of this observed difference in download speed through hypothesis testing.
+
+```{r}
+
+# Difference in Download between ISP by connection type by city
+difference_in_download_btw_isp_by_city_tbl <- 
+    download_upload_speed_users_details_tbl %>%
+    speed_difference_btw_isp(type_of_broadband_connection,
+                             name_of_isp,
+                             city,
+                             measurement = percentile60_download_speed_in_Mbps ) %>% 
+    mutate(Fibrelicious = round(Fibrelicious, 2), 
+           Useus = round(Useus,2))
+
+difference_in_download_btw_isp_by_city_tbl
+```
+
+#### Comment 
+
+* Overall Fibrelicious ISP offers a better download speed compare to Useus ISP
+* We will need to test for the significance of this observed difference in download speed through hypothesis testing.
+* For users living in Samsville and opting for ADSL connection type, Useus ISP offers a better download speed
+
+```{r}
+
+# Difference in upload speed between ISP by connection type
+difference_in_upload_btw_isp_tbl <- download_upload_speed_users_details_tbl %>%
+    speed_difference_btw_isp(type_of_broadband_connection,
+                             name_of_isp,
+                             measurement = average_upload_speed_in_Mbps ) %>% 
+    mutate(Fibrelicious = round(Fibrelicious, 2), 
+           Useus = round(Useus,2))
+
+difference_in_upload_btw_isp_tbl
+```
+
+#### Comment
+
+* Overall Fibrelicious ISP offers a better upload speed compare to Useus ISP
+* We will need to test for the significance of this observed difference in upload speed through hypothesis testing.
+
+```{r}
+
+# Difference in Upload speed between ISP by connection type by city
+difference_in_upload_btw_isp_by_city_tbl <- 
+    download_upload_speed_users_details_tbl %>%
+    speed_difference_btw_isp(type_of_broadband_connection,
+                             name_of_isp,
+                             city,
+                             measurement = average_upload_speed_in_Mbps ) %>% 
+    mutate(Fibrelicious = round(Fibrelicious, 2), 
+           Useus = round(Useus,2))
+
+difference_in_upload_btw_isp_by_city_tbl
+```
+
+##### Comment
+
+* Overall Fibrelicious ISP offers a better upload speed compare to Useus ISP
+* We will need to test for the significance of this observed difference in upload speed through hypothesis testing.
+* For users living in Samsville and opting for ADSL connection type, Useus ISP offers a better Upload speed.
+
+
+
+### 4 - b) Speed distribution
+Distribution of average download speed by ISP by city by connection type
+
+```{r}
+
+# Data manipulation
+download_upload_speed_distibution_plot <- 
+download_upload_speed_users_details_tbl %>%
+    select(type_of_broadband_connection,
+           name_of_isp,
+           city,
+           percentile60_download_speed_in_Mbps) %>%
+    mutate(type_of_broadband_connection = type_of_broadband_connection %>% 
+               fct_relevel("ADSL","VDSL","Fibre")) %>% 
+    # Data Visualization
+    ggplot(aes(x    = percentile60_download_speed_in_Mbps, 
+               fill = type_of_broadband_connection)) +
+    geom_histogram(binwidth = 2, 
+                   alpha    = .7, 
+                   position ="identity") + 
+    facet_wrap(name_of_isp~ city) +
+    labs(title   = "Distribution of Average Download Speed by \nISP by City by Connection type",
+         x       = "Average download speed (Mpbs)",
+         y       = "Number of Users",
+         fill    = "Connection Type",
+         caption = "B. Alako: SamKnows Data analyst Technical Test") +
+    theme_ipsum()
+
+download_upload_speed_distibution_plot
+```
+
+##### Comment:
+
+* Regardless of the city, the broadband download speed are within the expected range.
+* There is not much difference between ADSL and VDSL download speed in Databury from Useus ISP
+* Fibre download speed are higher from Fibrelicious ISP compared to Useus ISP regardless of the city
+* For Users living in Databury and willing to get a Fiber connection, Fibrelicious offers a faster connection compare to Useus ISP
+* For those with a limited budget in Databury, assuming fast download speed correspond to higher cost
+There is no value for money buying the expensive package VDSL compared to the cheaper ADSL from Useus ISP, the download speed are almost the same.
+
+
+### 4 - c) Better/Worse
+
+Better/Worse download speed from Fibrelicious or from Useus, How much better/worse
+Let's get the answer from the download-speed-between-ISP-by-city-and-by-connection-type data frame computed above
+
+```{r}
+difference_in_download_btw_isp_by_city_tbl
+```
+
+##### Comment
+
+* A Customer living in Databury and having a Fibre connection
+will have a better connection speed from the ISP provider Fibrelicious.
+* The average fibre connection speed from Fibrelicious in Databury is
+219.15 Mbps
+
+
+### 4 - d) Speed by ISP
+
+Let's explore the overall download speed per hour per day by ISP by connection type 
+We hope to derive from this exploration an insight of the expected download difference by ISP
+To achieve this let's define a function to manipulate the data frame accordingly
+```{r}
+
+# A function for data manipulation
+download_speed_by_isp_per_hour <- function(data = data , isp_speed_difference = FALSE){
+    data_tbl <- data %>%
+    select(time_of_measurement,
+           measured_download_speed_in_Mbps,
+           type_of_broadband_connection,
+           name_of_isp) %>%
+    mutate(time_of_measurement = hour(time_of_measurement)) %>%
+    group_by(type_of_broadband_connection, 
+             name_of_isp, 
+             time_of_measurement) %>%
+    summarize(measured_download_speed_in_Mbps = mean(measured_download_speed_in_Mbps)) %>%
+    ungroup() 
+    if (isp_speed_difference){
+        data_tbl <- data_tbl %>% 
+            pivot_wider(names_from = name_of_isp, 
+                        values_from = measured_download_speed_in_Mbps) %>% 
+    mutate(measured_download_speed_in_Mbps = Fibrelicious - Useus) %>% 
+            mutate(label_text = str_glue("download speed = {round(measured_download_speed_in_Mbps,2)} Mbps"))
+    }
+    else{
+        data_tbl <- data_tbl %>% 
+            mutate(label_text = str_glue("download speed = {round(measured_download_speed_in_Mbps,2)} Mbps"))
+    }
+    data_tbl <- data_tbl %>% 
+    mutate(label_text = str_glue("Time: {time_of_measurement} o'clock
+                                 {label_text}")) %>%
+    mutate(type_of_broadband_connection = type_of_broadband_connection %>% 
+               fct_relevel("ADSL","VDSL","Fibre"))
+    return(data_tbl)
+}
+
+# A function for visualizing the manipulated data
+plot_download_by_isp <- function(data = data, isp_speed_difference = FALSE, legend_position= "none"){
+    download_speed_plot <- download_speed_by_isp_per_hour(data = data, 
+                                                          isp_speed_difference = isp_speed_difference ) %>% 
+        # Data visualization
+        ggplot(aes(time_of_measurement,
+                   measured_download_speed_in_Mbps,
+                   text  = label_text,
+                   color = type_of_broadband_connection,
+                   group = type_of_broadband_connection)) +
+        geom_point() + 
+        geom_line() +
+        theme_ipsum() +
+        theme(legend.position = legend_position)    
+    return(download_speed_plot)
+} 
+```
+
+#### Overview download
+
+Download speed by ISP by connection type per hour of the day
+
+```{r}
+download_by_isp_plot <- successfull_download_tbl %>%  
+    plot_download_by_isp() +
+    facet_wrap(name_of_isp~type_of_broadband_connection,
+               scale = "free", ncol=3) + 
+    facet_wrap(name_of_isp ~ type_of_broadband_connection,
+               scale = "free", ncol=3) +
+    labs(title   = "Download by ISP at different time of the day",
+         x       = "Time of the day (hours)",
+         y       = "Average download speed in Mbps",
+         fill    = "Connection Type",
+         caption = "SamKnows Data analyst assessment test")  
+
+# Interactive plot
+ggplotly(download_by_isp_plot, tooltip = "text") 
+```
+
+##### Comment
+
+* Downloads speed are lowest between 6pm and 10pm and highest throughout 12am to 5pm
+* Lowest download speed coincide with not working hours, probably when most household are connected to the net (Netflix, YouTube ... time!!)
+
+
+#### Difference
+Download speed difference by ISP by connection type per hour of the day
+
+```{r}
+difference_download_by_isp_plot <- successfull_download_tbl %>%  
+    plot_download_by_isp(isp_speed_difference = TRUE) +
+    facet_wrap(~type_of_broadband_connection,
+               scale = "free", ncol=3) +
+    labs(title   = "Difference in Download speed by ISP at different time of the day",
+        x       = "Time of the day (hours)",
+        y       = "Difference in download speed (Mbps)",
+        fill    = "Connection Type",
+        caption = "B. Alako: SamKnows Data analyst assessment test") 
+
+ggplotly(difference_download_by_isp_plot, tooltip = "text")
+```
+
+##### Comment
+
+* Downloads speed difference between ISP are lowest between 6pm and 10pm and highest throughout 12am to 5pm for both Fibre and VDSL Connection type. Corroborating the above observations.
+* Overall ADSL download speed difference pattern is similar to Fibre and VDSL with lowest download speed at 3PM and 2AM
+
+
