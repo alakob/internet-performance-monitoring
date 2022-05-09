@@ -634,8 +634,6 @@ Download speed by ISP by connection type per hour of the day
 ```{r}
 download_by_isp_plot <- successfull_download_tbl %>%  
     plot_download_by_isp() +
-    facet_wrap(name_of_isp~type_of_broadband_connection,
-               scale = "free", ncol=3) + 
     facet_wrap(name_of_isp ~ type_of_broadband_connection,
                scale = "free", ncol=3) +
     labs(title   = "Download by ISP at different time of the day",
