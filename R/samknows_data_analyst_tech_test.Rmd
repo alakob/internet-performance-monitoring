@@ -418,7 +418,9 @@ speed_difference_btw_isp <-
             summarize(mean_measurement = mean(!! measurement_expr)) %>%
             ungroup() %>%
             pivot_wider(names_from  = name_of_isp,
-                        values_from = mean_measurement)
+                        values_from = mean_measurement) %>% 
+          mutate(type_of_broadband_connection = type_of_broadband_connection %>% 
+               fct_relevel("ADSL","VDSL","Fibre"))
     }
     else{
         stop(str_glue("measurement = {measurement_expr} is not a permitted option." ))
@@ -594,7 +596,7 @@ download_speed_by_isp_per_hour <- function(data = data , isp_speed_difference = 
         data_tbl <- data_tbl %>% 
             pivot_wider(names_from = name_of_isp, 
                         values_from = measured_download_speed_in_Mbps) %>% 
-    mutate(measured_download_speed_in_Mbps = Fibrelicious - Useus) %>% 
+    mutate(measured_download_speed_in_Mbps = abs(Fibrelicious - Useus)) %>% 
             mutate(label_text = str_glue("download speed = {round(measured_download_speed_in_Mbps,2)} Mbps"))
     }
     else{
@@ -630,6 +632,16 @@ plot_download_by_isp <- function(data = data, isp_speed_difference = FALSE, lege
 #### Overview download
 
 Download speed by ISP by connection type per hour of the day
+
+```{r}
+# Relabel connection type as per observation above
+successfull_download_tbl <- successfull_download_tbl %>% 
+   mutate(type_of_broadband_connection = case_when(
+        type_of_broadband_connection == "ADSL"  & measured_download_speed_in_Mbps > 25 ~ "Fibre", 
+        type_of_broadband_connection == "Fibre" & measured_download_speed_in_Mbps < 25 ~ "ADSL",  
+        TRUE ~ type_of_broadband_connection
+))
+```
 
 ```{r}
 download_by_isp_plot <- successfull_download_tbl %>%  
@@ -672,6 +684,5 @@ ggplotly(difference_download_by_isp_plot, tooltip = "text")
 ##### Comment
 
 * Downloads speed difference between ISP are lowest between 6pm and 10pm and highest throughout 12am to 5pm for both Fibre and VDSL Connection type. Corroborating the above observations.
-* Overall ADSL download speed difference pattern is similar to Fibre and VDSL with lowest download speed at 3PM and 2AM
 
 
