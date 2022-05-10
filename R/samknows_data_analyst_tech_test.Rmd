@@ -683,6 +683,6 @@ ggplotly(difference_download_by_isp_plot, tooltip = "text")
 
 ##### Comment
 
-* Downloads speed difference between ISP are lowest between 6pm and 10pm and highest throughout 12am to 5pm for both Fibre and VDSL Connection type. Corroborating the above observations.
+* Downloads speed difference between ISP are lowest between 6pm and 10pm and highest throughout 12am to 5pm for all three Connection types. Corroborating the above observations.
 
 
