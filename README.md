@@ -1,9 +1,6 @@
 # samknows
 Data analyst technical test
 
-### Report
-See output/samknows_data_analyst_tech_test.html for a rendered copy of the Data analyst technical test
-
 ### Markdown file
 see R/samknows_data_analyst_tech_test.Rmd for an Rmarkdown file of the Data analyst technical test
 
